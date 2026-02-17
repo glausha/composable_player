@@ -1,0 +1,10 @@
+build/
+install/
+log/
+.colcon/
+.git/
+.vscode/
+.idea/
+*.bag
+*.mcap
+.env
