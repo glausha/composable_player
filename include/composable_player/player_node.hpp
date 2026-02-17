@@ -13,6 +13,7 @@
 #include "rclcpp/generic_publisher.hpp"
 #include "rosbag2_cpp/reader.hpp"
 #include "rosbag2_storage/storage_options.hpp"
+#include "rosgraph_msgs/msg/clock.hpp"
 #include "std_srvs/srv/trigger.hpp"
 
 namespace composable_player
@@ -28,6 +29,7 @@ private:
   void open_bag();
   void setup_publishers();
   void playback_callback();
+  void clock_callback();
   void reset_playback();
 
   void on_pause(
@@ -37,6 +39,8 @@ private:
     const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
     std::shared_ptr<std_srvs::srv::Trigger::Response> response);
 
+  int64_t get_current_playback_time() const;
+
   // Parameters
   std::string bag_uri_;
   std::string storage_id_;
@@ -44,6 +48,8 @@ private:
   bool loop_;
   bool start_paused_;
   std::vector<std::string> topic_filter_;
+  bool publish_clock_;
+  double clock_frequency_;
 
   // Playback state
   std::unique_ptr<rosbag2_cpp::Reader> reader_;
@@ -59,6 +65,8 @@ private:
 
   // ROS interfaces
   rclcpp::TimerBase::SharedPtr playback_timer_;
+  rclcpp::TimerBase::SharedPtr clock_timer_;
+  rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr clock_pub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr pause_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr resume_srv_;
 };
