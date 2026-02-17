@@ -10,7 +10,7 @@ graph LR
     end
     BAG[(bag/mcap)] -->|read| P
     P -->|publish| TOPICS{{ROS2 Topics}}
-    P -->|publish_clock| CLK[/clock]
+    P -->|bag timestamp| CLK[/clock]
     CLK -.->|use_sim_time| R
     TOPICS -->|subscribe| R
     R -->|write| OUT[(output bag/mcap)]
@@ -33,8 +33,10 @@ Reads MCAP/rosbag files and publishes serialized messages on original topics.
 | `start_paused` | bool | `false` | Start paused |
 | `topics` | string[] | `[]` | Topic filter (empty = all) |
 | `use_sim_time` | bool | `false` | Use `/clock` for `now()` |
-| `publish_clock` | bool | `false` | Publish `/clock` from playback time |
+| `publish_clock` | bool | `false` | Publish `/clock` from bag message timestamps |
 | `clock_frequency` | double | `100.0` | `/clock` publish rate (Hz) |
+
+`publish_clock`: `/clock` value is the `time_stamp` of the last read bag message. Playback timing itself always uses wall clock.
 
 #### Services
 
@@ -49,6 +51,8 @@ Reads MCAP/rosbag files and publishes serialized messages on original topics.
 |---|---|---|
 | *(from bag)* | *(original types)* | Always |
 | `/clock` | `rosgraph_msgs/msg/Clock` | `publish_clock=true` |
+
+When `publish_clock=true`, bag-internal `/clock` topic is skipped to prevent conflict.
 
 ---
 
@@ -91,13 +95,12 @@ Dynamic — determined by `topics` parameter or topic discovery.
 ros2 launch composable_player player.launch.py bag_uri:=/path/to/bag
 ```
 
-### Player with sim time
+### Player with sim time clock
 
 ```bash
 ros2 launch composable_player player.launch.py \
   bag_uri:=/path/to/bag \
-  publish_clock:=true \
-  use_sim_time:=false
+  publish_clock:=true
 ```
 
 ### Standalone Recorder
@@ -165,13 +168,14 @@ sequenceDiagram
     participant Recorder as RecorderNode
     participant Other as Other Nodes
 
-    Player->>Bag: read messages
-    Player->>Clock: publish clock (publish_clock=true)
+    Player->>Bag: read_next()
+    Note over Player: last_bag_time = msg.time_stamp
+    Player->>Clock: publish(msg.time_stamp)
     Clock-->>Recorder: sim time (use_sim_time=true)
     Clock-->>Other: sim time (use_sim_time=true)
     Player->>Other: publish bag topics
     Other->>Recorder: processed data
-    Recorder->>Recorder: timestamp via now() (sim time)
+    Recorder->>Recorder: now() returns sim time
 ```
 
 ## Storage Formats
