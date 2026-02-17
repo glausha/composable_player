@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "container-use": {
+      "type": "stdio",
+      "command": "/home/akala/.local/bin/cu",
+      "args": [
+        "stdio"
+      ],
+      "env": {}
+    }
+  }
+}
