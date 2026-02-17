@@ -12,7 +12,7 @@ API.md: アプリケーションを操作する方法を記載。プライベー
 
 ---
 <TASK>
-Ros2のコンポーザブルノードに対応したパッケージを作成してください。MCAP並びにrosbagファイルを再生するノード、保存するノードが必要です
+
 </TASK>
 
 <technical-feasibility-researcher>
