@@ -20,6 +20,8 @@ PlayerNode::PlayerNode(const rclcpp::NodeOptions & options)
   declare_parameter<bool>("loop", false);
   declare_parameter<bool>("start_paused", false);
   declare_parameter<std::vector<std::string>>("topics", std::vector<std::string>{});
+  declare_parameter<bool>("publish_clock", false);
+  declare_parameter<double>("clock_frequency", 100.0);
 
   bag_uri_ = get_parameter("bag_uri").as_string();
   storage_id_ = get_parameter("storage_id").as_string();
@@ -27,6 +29,8 @@ PlayerNode::PlayerNode(const rclcpp::NodeOptions & options)
   loop_ = get_parameter("loop").as_bool();
   start_paused_ = get_parameter("start_paused").as_bool();
   topic_filter_ = get_parameter("topics").as_string_array();
+  publish_clock_ = get_parameter("publish_clock").as_bool();
+  clock_frequency_ = get_parameter("clock_frequency").as_double();
 
   if (bag_uri_.empty()) {
     RCLCPP_ERROR(get_logger(), "Parameter 'bag_uri' is required");
@@ -36,6 +40,10 @@ PlayerNode::PlayerNode(const rclcpp::NodeOptions & options)
   if (rate_ <= 0.0) {
     RCLCPP_WARN(get_logger(), "Invalid rate %.2f, defaulting to 1.0", rate_);
     rate_ = 1.0;
+  }
+
+  if (clock_frequency_ <= 0.0) {
+    clock_frequency_ = 100.0;
   }
 
   pause_srv_ = create_service<std_srvs::srv::Trigger>(
@@ -49,6 +57,16 @@ PlayerNode::PlayerNode(const rclcpp::NodeOptions & options)
   open_bag();
   setup_publishers();
 
+  if (publish_clock_) {
+    clock_pub_ = create_publisher<rosgraph_msgs::msg::Clock>("/clock", rclcpp::QoS(10));
+    auto clock_period = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::duration<double>(1.0 / clock_frequency_));
+    clock_timer_ = create_wall_timer(
+      clock_period,
+      std::bind(&PlayerNode::clock_callback, this));
+    RCLCPP_INFO(get_logger(), "Publishing /clock at %.1f Hz", clock_frequency_);
+  }
+
   paused_ = start_paused_;
   playback_wall_start_ = std::chrono::steady_clock::now();
 
@@ -57,8 +75,11 @@ PlayerNode::PlayerNode(const rclcpp::NodeOptions & options)
     std::bind(&PlayerNode::playback_callback, this));
 
   RCLCPP_INFO(
-    get_logger(), "PlayerNode initialized: uri=%s storage=%s rate=%.2f loop=%s",
-    bag_uri_.c_str(), storage_id_.c_str(), rate_, loop_ ? "true" : "false");
+    get_logger(),
+    "PlayerNode initialized: uri=%s storage=%s rate=%.2f loop=%s use_sim_time=%s",
+    bag_uri_.c_str(), storage_id_.c_str(), rate_,
+    loop_ ? "true" : "false",
+    get_parameter("use_sim_time").as_bool() ? "true" : "false");
 }
 
 PlayerNode::~PlayerNode()
@@ -99,10 +120,40 @@ void PlayerNode::setup_publishers()
       continue;
     }
 
+    // Skip /clock topic from bag when publish_clock is enabled (we generate it)
+    if (publish_clock_ && name == "/clock") {
+      continue;
+    }
+
     auto publisher = create_generic_publisher(name, type, rclcpp::QoS(10));
     publishers_[name] = publisher;
     RCLCPP_INFO(get_logger(), "Publishing: %s [%s]", name.c_str(), type.c_str());
   }
+}
+
+int64_t PlayerNode::get_current_playback_time() const
+{
+  auto now = std::chrono::steady_clock::now();
+  auto wall_elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    now - playback_wall_start_).count();
+  return bag_start_time_ +
+    static_cast<int64_t>(static_cast<double>(wall_elapsed_ns) * rate_);
+}
+
+void PlayerNode::clock_callback()
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  if (paused_ || finished_ || !clock_pub_) {
+    return;
+  }
+
+  int64_t playback_time_ns = get_current_playback_time();
+
+  rosgraph_msgs::msg::Clock clock_msg;
+  clock_msg.clock.sec = static_cast<int32_t>(playback_time_ns / 1000000000LL);
+  clock_msg.clock.nanosec = static_cast<uint32_t>(playback_time_ns % 1000000000LL);
+  clock_pub_->publish(clock_msg);
 }
 
 void PlayerNode::playback_callback()
@@ -113,11 +164,7 @@ void PlayerNode::playback_callback()
     return;
   }
 
-  auto now = std::chrono::steady_clock::now();
-  auto wall_elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-    now - playback_wall_start_).count();
-  int64_t playback_time = bag_start_time_ +
-    static_cast<int64_t>(static_cast<double>(wall_elapsed_ns) * rate_);
+  int64_t playback_time = get_current_playback_time();
 
   int messages_published = 0;
   const int max_batch = 100;
