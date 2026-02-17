@@ -30,6 +30,7 @@ private:
   void setup_publishers();
   void playback_callback();
   void clock_callback();
+  void publish_clock(int64_t bag_time_ns);
   void reset_playback();
 
   void on_pause(
@@ -57,6 +58,7 @@ private:
   std::unordered_map<std::string, std::shared_ptr<rclcpp::GenericPublisher>> publishers_;
   std::shared_ptr<rosbag2_storage::SerializedBagMessage> next_msg_;
   int64_t bag_start_time_;
+  int64_t last_bag_time_ns_;
   std::chrono::steady_clock::time_point playback_wall_start_;
   bool paused_;
   bool finished_;
