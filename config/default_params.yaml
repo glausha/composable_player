@@ -1,0 +1,18 @@
+player:
+  ros__parameters:
+    bag_uri: ""
+    storage_id: "mcap"
+    rate: 1.0
+    loop: false
+    start_paused: false
+    topics: []
+
+recorder:
+  ros__parameters:
+    output_uri: ""
+    storage_id: "mcap"
+    topics: []
+    all_topics: false
+    exclude_topics:
+      - "/rosout"
+      - "/parameter_events"
