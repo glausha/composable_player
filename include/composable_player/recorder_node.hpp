@@ -33,12 +33,17 @@ private:
     const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
     std::shared_ptr<std_srvs::srv::Trigger::Response> response);
 
+  rcl_interfaces::msg::SetParametersResult on_parameters_changed(
+    const std::vector<rclcpp::Parameter> & parameters);
+
   // Parameters
   std::string output_uri_;
   std::string storage_id_;
   std::vector<std::string> topics_;
   bool all_topics_;
   std::vector<std::string> exclude_topics_;
+  uint64_t max_bag_size_;
+  int64_t max_bag_duration_;
 
   // Recording state
   std::unique_ptr<rosbag2_cpp::Writer> writer_;
@@ -50,6 +55,7 @@ private:
   // ROS interfaces
   rclcpp::TimerBase::SharedPtr discovery_timer_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr stop_srv_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 };
 
 }  // namespace composable_player
