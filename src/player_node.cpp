@@ -11,6 +11,7 @@ namespace composable_player
 
 PlayerNode::PlayerNode(const rclcpp::NodeOptions & options)
 : Node("player", options),
+  last_bag_time_ns_(0),
   paused_(false),
   finished_(false)
 {
@@ -64,10 +65,14 @@ PlayerNode::PlayerNode(const rclcpp::NodeOptions & options)
     clock_timer_ = create_wall_timer(
       clock_period,
       std::bind(&PlayerNode::clock_callback, this));
-    RCLCPP_INFO(get_logger(), "Publishing /clock at %.1f Hz", clock_frequency_);
+
+    // Publish initial clock at bag start time
+    publish_clock(bag_start_time_);
+    RCLCPP_INFO(get_logger(), "Publishing /clock at %.1f Hz (from bag timestamps)", clock_frequency_);
   }
 
   paused_ = start_paused_;
+  last_bag_time_ns_ = bag_start_time_;
   playback_wall_start_ = std::chrono::steady_clock::now();
 
   playback_timer_ = create_wall_timer(
@@ -140,20 +145,27 @@ int64_t PlayerNode::get_current_playback_time() const
     static_cast<int64_t>(static_cast<double>(wall_elapsed_ns) * rate_);
 }
 
+void PlayerNode::publish_clock(int64_t bag_time_ns)
+{
+  if (!clock_pub_) {
+    return;
+  }
+  rosgraph_msgs::msg::Clock clock_msg;
+  clock_msg.clock.sec = static_cast<int32_t>(bag_time_ns / 1000000000LL);
+  clock_msg.clock.nanosec = static_cast<uint32_t>(bag_time_ns % 1000000000LL);
+  clock_pub_->publish(clock_msg);
+}
+
 void PlayerNode::clock_callback()
 {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  if (paused_ || finished_ || !clock_pub_) {
+  if (paused_ || finished_) {
     return;
   }
 
-  int64_t playback_time_ns = get_current_playback_time();
-
-  rosgraph_msgs::msg::Clock clock_msg;
-  clock_msg.clock.sec = static_cast<int32_t>(playback_time_ns / 1000000000LL);
-  clock_msg.clock.nanosec = static_cast<uint32_t>(playback_time_ns % 1000000000LL);
-  clock_pub_->publish(clock_msg);
+  // Publish the timestamp of the last message read from the bag
+  publish_clock(last_bag_time_ns_);
 }
 
 void PlayerNode::playback_callback()
@@ -180,6 +192,9 @@ void PlayerNode::playback_callback()
     if (next_msg_->time_stamp > playback_time) {
       break;
     }
+
+    // Update sim time from the bag message timestamp
+    last_bag_time_ns_ = next_msg_->time_stamp;
 
     auto it = publishers_.find(next_msg_->topic_name);
     if (it != publishers_.end()) {
@@ -217,6 +232,7 @@ void PlayerNode::reset_playback()
     metadata.starting_time.time_since_epoch()).count();
 
   next_msg_.reset();
+  last_bag_time_ns_ = bag_start_time_;
   playback_wall_start_ = std::chrono::steady_clock::now();
   finished_ = false;
 }
