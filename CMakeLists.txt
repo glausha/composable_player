@@ -10,6 +10,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(rosbag2_cpp REQUIRED)
 find_package(rosbag2_storage REQUIRED)
+find_package(rosgraph_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 
 # Player component
@@ -26,6 +27,7 @@ ament_target_dependencies(player_component
   rclcpp_components
   rosbag2_cpp
   rosbag2_storage
+  rosgraph_msgs
   std_srvs
 )
 rclcpp_components_register_node(player_component
