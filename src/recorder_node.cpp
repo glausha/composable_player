@@ -4,6 +4,7 @@
 #include <cstring>
 #include <functional>
 
+#include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
 
 namespace composable_player
@@ -20,12 +21,16 @@ RecorderNode::RecorderNode(const rclcpp::NodeOptions & options)
   declare_parameter<std::vector<std::string>>(
     "exclude_topics",
     std::vector<std::string>{"/rosout", "/parameter_events"});
+  declare_parameter<int>("max_bag_size", 0);
+  declare_parameter<int>("max_bag_duration", 0);
 
   output_uri_ = get_parameter("output_uri").as_string();
   storage_id_ = get_parameter("storage_id").as_string();
   topics_ = get_parameter("topics").as_string_array();
   all_topics_ = get_parameter("all_topics").as_bool();
   exclude_topics_ = get_parameter("exclude_topics").as_string_array();
+  max_bag_size_ = static_cast<uint64_t>(get_parameter("max_bag_size").as_int());
+  max_bag_duration_ = get_parameter("max_bag_duration").as_int();
 
   if (output_uri_.empty()) {
     RCLCPP_ERROR(get_logger(), "Parameter 'output_uri' is required");
@@ -40,6 +45,8 @@ RecorderNode::RecorderNode(const rclcpp::NodeOptions & options)
   rosbag2_storage::StorageOptions storage_options;
   storage_options.uri = output_uri_;
   storage_options.storage_id = storage_id_;
+  storage_options.max_bagfile_size = max_bag_size_;
+  storage_options.max_bagfile_duration = max_bag_duration_;
 
   writer_ = std::make_unique<rosbag2_cpp::Writer>();
   writer_->open(storage_options);
@@ -48,6 +55,9 @@ RecorderNode::RecorderNode(const rclcpp::NodeOptions & options)
     "~/stop",
     std::bind(&RecorderNode::on_stop, this, std::placeholders::_1, std::placeholders::_2));
 
+  param_callback_handle_ = add_on_set_parameters_callback(
+    std::bind(&RecorderNode::on_parameters_changed, this, std::placeholders::_1));
+
   discovery_timer_ = create_wall_timer(
     std::chrono::seconds(1),
     std::bind(&RecorderNode::discover_and_subscribe, this));
@@ -55,14 +65,40 @@ RecorderNode::RecorderNode(const rclcpp::NodeOptions & options)
   discover_and_subscribe();
 
   RCLCPP_INFO(
-    get_logger(), "RecorderNode initialized: uri=%s storage=%s all_topics=%s",
-    output_uri_.c_str(), storage_id_.c_str(), all_topics_ ? "true" : "false");
+    get_logger(),
+    "RecorderNode initialized: uri=%s storage=%s all_topics=%s use_sim_time=%s",
+    output_uri_.c_str(), storage_id_.c_str(),
+    all_topics_ ? "true" : "false",
+    get_parameter("use_sim_time").as_bool() ? "true" : "false");
 }
 
 RecorderNode::~RecorderNode()
 {
   std::lock_guard<std::mutex> lock(mutex_);
   writer_.reset();
+}
+
+rcl_interfaces::msg::SetParametersResult RecorderNode::on_parameters_changed(
+  const std::vector<rclcpp::Parameter> & parameters)
+{
+  rcl_interfaces::msg::SetParametersResult result;
+  result.successful = true;
+
+  for (const auto & param : parameters) {
+    if (param.get_name() == "topics") {
+      topics_ = param.as_string_array();
+      RCLCPP_INFO(get_logger(), "Updated topics parameter (%zu topics)", topics_.size());
+    } else if (param.get_name() == "all_topics") {
+      all_topics_ = param.as_bool();
+      RCLCPP_INFO(get_logger(), "Updated all_topics=%s", all_topics_ ? "true" : "false");
+    } else if (param.get_name() == "exclude_topics") {
+      exclude_topics_ = param.as_string_array();
+      RCLCPP_INFO(get_logger(), "Updated exclude_topics (%zu topics)", exclude_topics_.size());
+    }
+  }
+
+  discover_and_subscribe();
+  return result;
 }
 
 void RecorderNode::discover_and_subscribe()
