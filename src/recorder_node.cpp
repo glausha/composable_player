@@ -179,15 +179,17 @@ void RecorderNode::write_message(
   bag_message->serialized_data = std::shared_ptr<rcutils_uint8_array_t>(
     new rcutils_uint8_array_t,
     [](rcutils_uint8_array_t * p) {
-      rcutils_uint8_array_fini(p);
+      auto fini_ret = rcutils_uint8_array_fini(p);
+      (void)fini_ret;
       delete p;
     });
 
   *bag_message->serialized_data = rcutils_get_zero_initialized_uint8_array();
+  rcutils_allocator_t allocator = rcutils_get_default_allocator();
   auto ret = rcutils_uint8_array_init(
     bag_message->serialized_data.get(),
     rcl_msg.buffer_length,
-    &rcutils_get_default_allocator());
+    &allocator);
 
   if (ret != RCUTILS_RET_OK) {
     RCLCPP_ERROR(get_logger(), "Failed to allocate serialized data for %s", topic_name.c_str());
