@@ -66,7 +66,6 @@ PlayerNode::PlayerNode(const rclcpp::NodeOptions & options)
       clock_period,
       std::bind(&PlayerNode::clock_callback, this));
 
-    // Publish initial clock at bag start time
     publish_clock(bag_start_time_);
     RCLCPP_INFO(get_logger(), "Publishing /clock at %.1f Hz (from bag timestamps)", clock_frequency_);
   }
@@ -118,14 +117,13 @@ void PlayerNode::setup_publishers()
 
   auto topics = reader_->get_all_topics_and_types();
   for (const auto & topic_info : topics) {
-    const auto & name = topic_info.topic_metadata.name;
-    const auto & type = topic_info.topic_metadata.type;
+    const auto & name = topic_info.name;
+    const auto & type = topic_info.type;
 
     if (use_filter && filter_set.find(name) == filter_set.end()) {
       continue;
     }
 
-    // Skip /clock topic from bag when publish_clock is enabled (we generate it)
     if (publish_clock_ && name == "/clock") {
       continue;
     }
@@ -164,7 +162,6 @@ void PlayerNode::clock_callback()
     return;
   }
 
-  // Publish the timestamp of the last message read from the bag
   publish_clock(last_bag_time_ns_);
 }
 
@@ -193,7 +190,6 @@ void PlayerNode::playback_callback()
       break;
     }
 
-    // Update sim time from the bag message timestamp
     last_bag_time_ns_ = next_msg_->time_stamp;
 
     auto it = publishers_.find(next_msg_->topic_name);
