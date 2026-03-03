@@ -28,6 +28,7 @@ public:
 private:
   void open_bag();
   void setup_publishers();
+  void setup_clock();
   void playback_callback();
   void clock_callback();
   void publish_clock(int64_t bag_time_ns);
@@ -59,6 +60,8 @@ private:
   std::shared_ptr<rosbag2_storage::SerializedBagMessage> next_msg_;
   int64_t bag_start_time_;
   int64_t last_bag_time_ns_;
+  bool bag_has_clock_;
+  bool use_synthetic_clock_;
   std::chrono::steady_clock::time_point playback_wall_start_;
   bool paused_;
   bool finished_;
