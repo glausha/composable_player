@@ -28,6 +28,7 @@ private:
   void write_message(
     std::shared_ptr<rclcpp::SerializedMessage> msg,
     const std::string & topic_name);
+  void shutdown_writer();
 
   void on_stop(
     const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
@@ -45,17 +46,19 @@ private:
   uint64_t max_bag_size_;
   int64_t max_bag_duration_;
 
-  // Recording state
-  std::unique_ptr<rosbag2_cpp::Writer> writer_;
-  std::unordered_set<std::string> subscribed_topics_;
-  std::vector<std::shared_ptr<rclcpp::GenericSubscription>> subscriptions_;
-  bool recording_;
+  // mutex_ declared first — destroyed last
   std::mutex mutex_;
+  bool recording_;
 
-  // ROS interfaces
-  rclcpp::TimerBase::SharedPtr discovery_timer_;
-  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr stop_srv_;
+  // ROS interfaces (destroyed before recording state)
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr stop_srv_;
+  rclcpp::TimerBase::SharedPtr discovery_timer_;
+  std::vector<std::shared_ptr<rclcpp::GenericSubscription>> subscriptions_;
+
+  // Writer destroyed after subscriptions are gone
+  std::unordered_set<std::string> subscribed_topics_;
+  std::unique_ptr<rosbag2_cpp::Writer> writer_;
 };
 
 }  // namespace composable_player
