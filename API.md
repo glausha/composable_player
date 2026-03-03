@@ -10,7 +10,7 @@ graph LR
     end
     BAG[(bag/mcap)] -->|read| P
     P -->|publish| TOPICS{{ROS2 Topics}}
-    P -->|bag timestamp| CLK[/clock]
+    P -->|bag /clock or synthetic| CLK[/clock]
     CLK -.->|use_sim_time| R
     TOPICS -->|subscribe| R
     R -->|write| OUT[(output bag/mcap)]
@@ -33,10 +33,23 @@ Reads MCAP/rosbag files and publishes serialized messages on original topics.
 | `start_paused` | bool | `false` | Start paused |
 | `topics` | string[] | `[]` | Topic filter (empty = all) |
 | `use_sim_time` | bool | `false` | Use `/clock` for `now()` |
-| `publish_clock` | bool | `false` | Publish `/clock` from bag message timestamps |
-| `clock_frequency` | double | `100.0` | `/clock` publish rate (Hz) |
+| `publish_clock` | bool | `false` | Generate synthetic `/clock` (only when bag lacks `/clock`) |
+| `clock_frequency` | double | `100.0` | Synthetic `/clock` rate (Hz) |
 
-`publish_clock`: `/clock` value is the `time_stamp` of the last read bag message. Playback timing itself always uses wall clock.
+#### /clock Handling
+
+```mermaid
+flowchart TD
+    A[open_bag] --> B{bag contains /clock?}
+    B -->|Yes| C[Replay /clock from bag via GenericPublisher]
+    B -->|No| D{publish_clock param?}
+    D -->|true| E[Generate synthetic /clock from msg timestamps]
+    D -->|false| F[No /clock published]
+```
+
+- **Bag has `/clock`**: Replayed as-is (e.g., simulation clock from Gazebo). `publish_clock` param is ignored.
+- **Bag lacks `/clock`** + `publish_clock=true`: Synthetic `/clock` generated from `last_bag_time_ns_` at `clock_frequency` Hz.
+- **Bag lacks `/clock`** + `publish_clock=false`: No `/clock` published.
 
 #### Services
 
@@ -50,9 +63,7 @@ Reads MCAP/rosbag files and publishes serialized messages on original topics.
 | Name | Type | Condition |
 |---|---|---|
 | *(from bag)* | *(original types)* | Always |
-| `/clock` | `rosgraph_msgs/msg/Clock` | `publish_clock=true` |
-
-When `publish_clock=true`, bag-internal `/clock` topic is skipped to prevent conflict.
+| `/clock` | `rosgraph_msgs/msg/Clock` | Bag has `/clock`, or `publish_clock=true` fallback |
 
 ---
 
@@ -75,6 +86,8 @@ Subscribes to ROS2 topics and writes serialized messages to MCAP/rosbag files.
 
 Dynamic parameters can be changed at runtime via `ros2 param set`.
 
+`/clock` is **not** excluded by default. Simulation clock is recorded for faithful replay.
+
 #### Services
 
 | Name | Type | Description |
@@ -95,11 +108,21 @@ Dynamic — determined by `topics` parameter or topic discovery.
 ros2 launch composable_player player.launch.py bag_uri:=/path/to/bag
 ```
 
-### Player with sim time clock
+### Player with sim time (bag contains /clock)
 
 ```bash
 ros2 launch composable_player player.launch.py \
-  bag_uri:=/path/to/bag \
+  bag_uri:=/path/to/sim_bag \
+  use_sim_time:=false
+```
+
+`/clock` from bag is replayed automatically.
+
+### Player with synthetic clock (bag lacks /clock)
+
+```bash
+ros2 launch composable_player player.launch.py \
+  bag_uri:=/path/to/real_bag \
   publish_clock:=true
 ```
 
@@ -126,8 +149,7 @@ ros2 param set /recorder topics "['/camera/image', '/imu/data', '/lidar/points']
 ros2 launch composable_player composable.launch.py \
   bag_uri:=/path/to/input \
   output_uri:=/path/to/output \
-  use_sim_time:=true \
-  publish_clock:=true
+  use_sim_time:=true
 ```
 
 ### Runtime Component Loading
@@ -136,7 +158,7 @@ ros2 launch composable_player composable.launch.py \
 ros2 run rclcpp_components component_container
 
 ros2 component load /ComponentManager composable_player composable_player::PlayerNode \
-  -p bag_uri:=/path/to/bag -p rate:=2.0 -p publish_clock:=true
+  -p bag_uri:=/path/to/bag -p rate:=2.0
 
 ros2 component load /ComponentManager composable_player composable_player::RecorderNode \
   -p output_uri:=/path/to/output -p all_topics:=true -p use_sim_time:=true
@@ -169,8 +191,12 @@ sequenceDiagram
     participant Other as Other Nodes
 
     Player->>Bag: read_next()
-    Note over Player: last_bag_time = msg.time_stamp
-    Player->>Clock: publish(msg.time_stamp)
+    alt Bag has /clock
+        Player->>Clock: publish(bag /clock msg)
+    else Bag lacks /clock (publish_clock=true)
+        Note over Player: last_bag_time = msg.time_stamp
+        Player->>Clock: publish(synthetic clock)
+    end
     Clock-->>Recorder: sim time (use_sim_time=true)
     Clock-->>Other: sim time (use_sim_time=true)
     Player->>Other: publish bag topics
