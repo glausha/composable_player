@@ -74,8 +74,34 @@ RecorderNode::RecorderNode(const rclcpp::NodeOptions & options)
 
 RecorderNode::~RecorderNode()
 {
+  shutdown_writer();
+}
+
+void RecorderNode::shutdown_writer()
+{
   std::lock_guard<std::mutex> lock(mutex_);
-  writer_.reset();
+  if (!recording_) {
+    return;
+  }
+  recording_ = false;
+
+  // 1. Stop discovery timer — no new subscriptions
+  if (discovery_timer_) {
+    discovery_timer_->cancel();
+    discovery_timer_.reset();
+  }
+
+  // 2. Drop param callback — no parameter-triggered discovery
+  param_callback_handle_.reset();
+
+  // 3. Clear subscriptions — no more write_message() calls
+  subscriptions_.clear();
+
+  // 4. Close writer — flushes data and writes MCAP index/summary
+  if (writer_) {
+    writer_.reset();
+    RCLCPP_INFO(get_logger(), "Writer closed, MCAP index written");
+  }
 }
 
 rcl_interfaces::msg::SetParametersResult RecorderNode::on_parameters_changed(
@@ -209,19 +235,9 @@ void RecorderNode::on_stop(
   const std::shared_ptr<std_srvs::srv::Trigger::Request>,
   std::shared_ptr<std_srvs::srv::Trigger::Response> response)
 {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (recording_) {
-    recording_ = false;
-    discovery_timer_->cancel();
-    subscriptions_.clear();
-    writer_.reset();
-    response->success = true;
-    response->message = "Recording stopped";
-    RCLCPP_INFO(get_logger(), "Recording stopped");
-  } else {
-    response->success = false;
-    response->message = "Not recording";
-  }
+  shutdown_writer();
+  response->success = true;
+  response->message = "Recording stopped";
 }
 
 }  // namespace composable_player
