@@ -12,6 +12,8 @@ namespace composable_player
 PlayerNode::PlayerNode(const rclcpp::NodeOptions & options)
 : Node("player", options),
   last_bag_time_ns_(0),
+  bag_has_clock_(false),
+  use_synthetic_clock_(false),
   paused_(false),
   finished_(false)
 {
@@ -57,18 +59,7 @@ PlayerNode::PlayerNode(const rclcpp::NodeOptions & options)
 
   open_bag();
   setup_publishers();
-
-  if (publish_clock_) {
-    clock_pub_ = create_publisher<rosgraph_msgs::msg::Clock>("/clock", rclcpp::QoS(10));
-    auto clock_period = std::chrono::duration_cast<std::chrono::nanoseconds>(
-      std::chrono::duration<double>(1.0 / clock_frequency_));
-    clock_timer_ = create_wall_timer(
-      clock_period,
-      std::bind(&PlayerNode::clock_callback, this));
-
-    publish_clock(bag_start_time_);
-    RCLCPP_INFO(get_logger(), "Publishing /clock at %.1f Hz (from bag timestamps)", clock_frequency_);
-  }
+  setup_clock();
 
   paused_ = start_paused_;
   last_bag_time_ns_ = bag_start_time_;
@@ -105,9 +96,20 @@ void PlayerNode::open_bag()
   bag_start_time_ = std::chrono::duration_cast<std::chrono::nanoseconds>(
     start_time.time_since_epoch()).count();
 
+  // Detect /clock in bag
+  bag_has_clock_ = false;
+  auto topics = reader_->get_all_topics_and_types();
+  for (const auto & topic_info : topics) {
+    if (topic_info.name == "/clock") {
+      bag_has_clock_ = true;
+      break;
+    }
+  }
+
   RCLCPP_INFO(
-    get_logger(), "Opened bag: %zu topics, %zu messages",
-    metadata.topics_with_message_count.size(), metadata.message_count);
+    get_logger(), "Opened bag: %zu topics, %zu messages, /clock %s",
+    metadata.topics_with_message_count.size(), metadata.message_count,
+    bag_has_clock_ ? "found" : "not found");
 }
 
 void PlayerNode::setup_publishers()
@@ -124,13 +126,37 @@ void PlayerNode::setup_publishers()
       continue;
     }
 
-    if (publish_clock_ && name == "/clock") {
-      continue;
-    }
-
+    // /clock in bag → replay as generic publisher (handled by playback_callback)
+    // No special skip needed; it's published alongside other topics
     auto publisher = create_generic_publisher(name, type, rclcpp::QoS(10));
     publishers_[name] = publisher;
     RCLCPP_INFO(get_logger(), "Publishing: %s [%s]", name.c_str(), type.c_str());
+  }
+}
+
+void PlayerNode::setup_clock()
+{
+  // Bag has /clock → replayed from bag via generic publisher, no synthetic clock
+  // Bag lacks /clock + publish_clock=true → generate synthetic /clock from msg timestamps
+  // Bag lacks /clock + publish_clock=false → no /clock published
+  use_synthetic_clock_ = !bag_has_clock_ && publish_clock_;
+
+  if (bag_has_clock_) {
+    RCLCPP_INFO(get_logger(), "/clock: replaying from bag");
+  } else if (use_synthetic_clock_) {
+    RCLCPP_INFO(
+      get_logger(), "/clock: generating synthetic at %.1f Hz (bag has no /clock)",
+      clock_frequency_);
+  }
+
+  if (use_synthetic_clock_) {
+    clock_pub_ = create_publisher<rosgraph_msgs::msg::Clock>("/clock", rclcpp::QoS(10));
+    auto clock_period = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::duration<double>(1.0 / clock_frequency_));
+    clock_timer_ = create_wall_timer(
+      clock_period,
+      std::bind(&PlayerNode::clock_callback, this));
+    publish_clock(bag_start_time_);
   }
 }
 
